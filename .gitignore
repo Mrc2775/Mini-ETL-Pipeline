@@ -1,0 +1,7 @@
+.idea/
+.venv/
+books.db
+results_by_year.csv
+results_top_authors.csv
+__pycache__/
+*.pyc

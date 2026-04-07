@@ -1,71 +1,58 @@
-# Mini ETL Pipeline Project
-# This project does 5 things:
-# 1. Gets book data from Open Library API
-# 2. Picks only the fields we need
-# 3. Saves the data into a SQLite database
-# 4. Runs SQL queries on the data
-# 5. Exports the query results into CSV files
+# Mini ETL Pipeline
+# 1. pulls book data from some open library api i found
+# 2. cleans it up (takes out the stuff we don't need)
+# 3. dumps it into a sqlite database
+# 4. runs some queries on it
+# 5. exports everything to csv so the prof can open it in excel
 
 import requests
 import sqlite3
 import csv
 
 
-# This function gets book data from Open Library
+# hits the open library api and grabs books by subject
 def fetch_books(subject, limit):
     url = "https://openlibrary.org/search.json"
 
-    # These are the values we send to the API
     params = {
         "q": f"subject:{subject}",
         "limit": limit
     }
 
-    # Sending request to API
     response = requests.get(url, params=params)
+    response.raise_for_status()  # crashes if something goes wrong, which is fine
 
-    # This will show an error if the request fails
-    response.raise_for_status()
-
-    # Changing JSON response into Python dictionary
     data = response.json()
-
-    # Getting the list of books from "docs"
     books = data.get("docs", [])
 
     return books
 
 
-# This function cleans the raw API data
+# goes through the raw api data and only keeps what we actually care about
 def clean_book_data(raw_books):
     cleaned_books = []
 
     for book in raw_books:
         title = book.get("title")
 
-        # author_name usually comes as a list
+        # api returns authors as a list for some reason so just grab the first one
         author_list = book.get("author_name")
-
-        if author_list:
-            author = author_list[0]
-        else:
-            author = None
+        author = author_list[0] if author_list else None
 
         year = book.get("first_publish_year")
 
-        # Only keeping the books that have a title
+        # skip books with no title bc that would be weird
         if title:
-            one_book = {
+            cleaned_books.append({
                 "title": title,
                 "author": author,
                 "year": year
-            }
-            cleaned_books.append(one_book)
+            })
 
     return cleaned_books
 
 
-# This function creates the database and table
+# sets up the sqlite db and creates the books table if it doesn't exist yet
 def create_database():
     conn = sqlite3.connect("books.db")
     cursor = conn.cursor()
@@ -83,27 +70,23 @@ def create_database():
     return conn
 
 
-# This function saves the cleaned books into the table
+# inserts all the cleaned books into the db
 def insert_books_into_db(conn, books):
     cursor = conn.cursor()
 
-    # Delete old data so we don't keep adding duplicates every time
+    # wipe old data first so we don't get duplicates every time we run it
     cursor.execute("DELETE FROM books")
 
     for book in books:
-        title = book["title"]
-        author = book["author"]
-        year = book["year"]
-
         cursor.execute("""
             INSERT INTO books (title, author, year)
             VALUES (?, ?, ?)
-        """, (title, author, year))
+        """, (book["title"], book["author"], book["year"]))
 
     conn.commit()
 
 
-# This function counts how many books are there in each year
+# query 1: how many books per year
 def get_books_by_year(conn):
     cursor = conn.cursor()
 
@@ -115,11 +98,10 @@ def get_books_by_year(conn):
         ORDER BY year
     """)
 
-    results = cursor.fetchall()
-    return results
+    return cursor.fetchall()
 
 
-# This function finds the top 5 authors with the most books
+# query 2: top 5 authors with the most books
 def get_top_authors(conn):
     cursor = conn.cursor()
 
@@ -132,64 +114,58 @@ def get_top_authors(conn):
         LIMIT 5
     """)
 
-    results = cursor.fetchall()
-    return results
+    return cursor.fetchall()
 
 
-# This function saves any results into a CSV file
+# writes query results to a csv file
 def save_to_csv(file_name, header, rows):
     with open(file_name, "w", newline="", encoding="utf-8") as file:
         writer = csv.writer(file)
-
-        # write column names first
         writer.writerow(header)
-
-        # write all the data rows
         writer.writerows(rows)
 
-    print(f"{file_name} has been created.")
+    print(f"saved to {file_name}")
 
 
-# Main part of the program starts here
+# --- main ---
+
 subject = "fantasy"
 limit = 200
 
-print("Starting Mini ETL Pipeline project...")
-print("Getting data from Open Library API...")
+print("running etl pipeline...")
+print("fetching books from api...")
 
-# Step 1: Extract
+# step 1: extract
 raw_books = fetch_books(subject, limit)
-print("Number of raw books fetched:", len(raw_books))
+print(f"got {len(raw_books)} books from api")
 
-# Step 2: Transform
+# step 2: transform
 cleaned_books = clean_book_data(raw_books)
-print("Number of cleaned books:", len(cleaned_books))
+print(f"kept {len(cleaned_books)} books after cleaning")
 
-# Step 3: Load
-print("Creating database and saving data...")
+# step 3: load
+print("loading into database...")
 conn = create_database()
 insert_books_into_db(conn, cleaned_books)
-print("Data saved into books.db")
+print("done, saved to books.db")
 
-# Step 4: Query
-print("Running SQL queries...")
-
+# step 4: query
+print("running queries...")
 books_by_year = get_books_by_year(conn)
 top_authors = get_top_authors(conn)
 
-print("\nBooks count by year (first 10 rows):")
+print("\nbooks per year (first 10):")
 for row in books_by_year[:10]:
     print(row)
 
-print("\nTop 5 authors by number of books:")
+print("\ntop 5 authors:")
 for row in top_authors:
     print(row)
 
-# Step 5: Export
-print("\nSaving results into CSV files...")
+# step 5: export
+print("\nexporting to csv...")
 save_to_csv("results_by_year.csv", ["year", "book_count"], books_by_year)
 save_to_csv("results_top_authors.csv", ["author", "book_count"], top_authors)
 
-# Close database connection
 conn.close()
-print("\nProject finished successfully.")
+print("\ndone!")
